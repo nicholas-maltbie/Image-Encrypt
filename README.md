@@ -15,7 +15,7 @@ This is a project for CS 4003, University of Cincinnati, instructor John Franco.
 
 ## Libraries
 
-* [Haskell Image Processing (HIP) Library](https://hackage.haskell.org/package/hip)
+* [Juicy Pixels](https://hackage.haskell.org/package/JuicyPixels)
 * [The cipher-aes package](https://hackage.haskell.org/package/cipher-aes)
 
 ## Specific Stenographic Methods
