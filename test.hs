@@ -1,12 +1,25 @@
 import Codec.Picture
 import Data.Vector
+import Data.Bits
 import qualified Data.Vector.Storable as V
 
 getRed :: PixelRGB8 -> Pixel8
 getRed (PixelRGB8 r g b) = r
 
 test :: Image PixelRGB8 -> IO ()
-test img = print (getRed (pixelAt img 0 0))
+test img = print (getChangedPixel (getRed (pixelAt img 0 0)) 0 False)
+
+--sets bit 
+getChanged :: Int -> Int -> Bool -> Int
+getChanged num idx val 
+    | val     = num .|. bit idx
+    | not val = num .&. complement (bit idx)
+
+--set pixel bit
+getChangedPixel :: Pixel8 -> Int -> Bool -> Pixel8
+getChangedPixel px idx val
+    | val     = px .|. bit idx
+    | not val = px .&. complement (bit idx)
 
 -- main function 
 main :: IO ()
