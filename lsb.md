@@ -7,6 +7,9 @@ Use the least significant bits of each pixel to hide a byte sequence into an ima
 Defined method for RGB8 images
 Write name of file, null terminator, bytes of file, null terminator. 
 
+max bytes that can be stored = 
+  width * height / (8 / (bits per pixel * 3))
+
 b = number of bits per color channel
 More bits cause more distortion but more information can be hidden
 b * 3 = number of bits per pixel

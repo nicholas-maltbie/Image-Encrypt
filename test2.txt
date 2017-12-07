@@ -1,1 +1,1 @@
-helloworld, how are you today
+This is a test message that I am hiding in an image

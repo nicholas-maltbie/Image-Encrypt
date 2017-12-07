@@ -23,6 +23,9 @@ fileToWord8 fp = do
 getWidth  :: Image a -> Int
 getWidth  (Image w _ _) = w
 
+maxBytes :: Image PixelRGB8 -> Int -> Int
+maxBytes img b = floor ((toRational ((getWidth img) * (getHeight img))) / (toRational (8.0 / (toRational ((toRational b) * 3.0)))))
+
 getMutWidth :: M.MutableImage m a -> Int
 getMutWidth (M.MutableImage w _ _) = w
 
@@ -48,6 +51,14 @@ convertString str = map BSI.c2w (C.unpack (C.pack str))
 convertWord8List :: [Word8] -> String
 convertWord8List list = map BSI.w2c list
 
+convertInt32Word8     :: Int -> [Word8]
+convertInt32Word8 num = map convertIntWord8 [(shiftR num (i * 8)) .&. 255 | i <- [0..3]]
+
+convertWord8Int        :: [Word8] -> Int
+convertWord8Int []     = 0
+convertWord8Int [x]    = fromIntegral x
+convertWord8Int (x:xs) = (fromIntegral x) + shiftL (convertWord8Int xs) 8
+
 -- convert Int to Word8
 convertIntWord8     :: Int -> Word8
 convertIntWord8 num = fromIntegral num
@@ -62,13 +73,15 @@ convertIntBits x b = map (testBit x) [0..b - 1]
 -- Reads a bit at index i from an image
 readBitFromImage :: Image PixelRGB8 -> Int -> Int -> Int -> Bool
 readBitFromImage img bitsPerPixel byteIdx bitIdx
+  | px < 0 || px >= (getWidth img) || py < 0 || py >= (getHeight img) = False
   | c == 0 = readPixelBit (getRed (pixelAt img px py)) d
   | c == 1 = readPixelBit (getGreen (pixelAt img px py)) d
   | c == 2 = readPixelBit (getBlue (pixelAt img px py)) d
   where 
     a = byteIdx * 8 + bitIdx
-    px = mod a (getWidth img)
-    py = div a (getWidth img)
+    p = (div a (bitsPerPixel * 3))
+    px = mod p (getWidth img)
+    py = div p (getWidth img)
     c = (div (mod a (bitsPerPixel * 3)) bitsPerPixel)
     d = (mod (mod a (bitsPerPixel * 3)) bitsPerPixel)
 
@@ -80,6 +93,11 @@ bitsToWord8 = foldl (\byte bit -> byte*2 + if bit then 1 else 0) 0
 readByte :: Image PixelRGB8 -> Int -> Int -> Word8
 readByte img idx b = bitsToWord8 [readBitFromImage img b idx i | i <- reverse [0..8-1]]
 
+readNBytes :: Image PixelRGB8 -> Int -> Int -> Int -> [Word8]
+readNBytes img start b n
+  | n <= 0     = []
+  | otherwise = (readByte img start b):(readNBytes img (start + 1) b (n - 1))
+
 readByteStream :: Image PixelRGB8 -> Int -> Int -> [Word8]
 readByteStream img start b 
   | byte == nullWord8 = [] -- end of stream
@@ -87,15 +105,19 @@ readByteStream img start b
   where byte = readByte img start b
 
 -- Decrypt bites from file
-decryptBytes :: Image PixelRGB8 -> IO ()
-decryptBytes img = do
-  BS.writeFile filePath (BS.pack file)
-  (print ("Saved output to " ++ filePath))
+decryptBytes :: Image PixelRGB8 -> Int -> IO ()
+decryptBytes img bitsPerPixel = do
+  putStrLn ("Found file '" ++ filePath ++ "', " ++ (show (len - (length filePath) - 5)) ++ " total bytes")
+  putStrLn ("What would you like to save the file as?")
+  o <- getLine
+  BS.writeFile o (BS.pack file)
+  putStrLn ("Saved output to " ++ o)
   where
-    b = 2 --bits used per pixel
-    name = readByteStream img 0 b
+    b = bitsPerPixel --bits used per pixel
+    len = convertWord8Int [readByte img i b | i <- [0..3]]
+    name = readByteStream img 4 b
     filePath = convertWord8List name
-    file = readByteStream img ((length name) + 1) b
+    file = readNBytes img (4 + (length name) + 1) b (len - ((length name) + 1))
   
 
 -- hide data in image
@@ -146,9 +168,13 @@ main = do
   putStrLn "Reading in image"
   imageLoad <- readImage imgf
   
+  putStrLn "How many bits are stored per pixel color channel? (default 2)"
+  val <- getLine
+  let bitsPerPixel = read val :: Int
+  
   -- load image and do stuff
   case imageLoad of
     Left error  -> putStrLn error
     Right image -> do
-        decryptBytes (convertRGB8 image)
+        decryptBytes (convertRGB8 image) bitsPerPixel
 
