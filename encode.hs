@@ -64,12 +64,7 @@ convertIntBits x b = map (testBit x) [0..b - 1]
 
 -- Write a set of bits at index i to an image
 -- writeBitToImage :: Image PixelRGB8 -> m (M.MutableImage (PrimState m) PixelRGB8) -> Int -> Int -> Int -> Bool -> m0 ()
-writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal
-  | px < 0 || px >= (getWidth orig) || py < 0 || py >= (getHeight orig) = M.writePixel img
-    0 0 (PixelRGB8 
-    (getRed (pixelAt orig 0 0))
-    (getGreen (pixelAt orig 0 0)) 
-    (getBlue (pixelAt orig 0 0)))
+writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal start sf
   | c == 0 = M.writePixel img px py (PixelRGB8 
     (getChangedPixel (getRed (pixelAt orig px py)) d bitVal) 
     (getGreen (pixelAt orig px py)) 
@@ -83,17 +78,23 @@ writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal
     (getGreen (pixelAt orig px py)) 
     (getChangedPixel (getBlue (pixelAt orig px py)) d bitVal))
   where
-    a = byteIdx * 8 + bitIdx
-    p = (div a (bitsPerPixel * 3))
+    a = floor (fromIntegral (byteIdx * 8 + bitIdx) * sf)
+    p = (div a (bitsPerPixel * 3)) + start 
     px = mod p (getWidth orig)
     py = div p (getWidth orig)
     c = (div (mod a (bitsPerPixel * 3)) bitsPerPixel)
     d = (mod (mod a (bitsPerPixel * 3)) bitsPerPixel)
 
--- Write a byte at index i to an image
--- writeByteToImage :: Image PixelRGB8 -> M.MutableImage (PrimState m) PixelRGB8 -> Int -> Int -> Word8 -> [Image ()]
-writeByteToImage orig img bitsPerPixel idx byte = ()
-  -- [writeBitToImage orig img bitsPerPixel idx i bit | i <- [0..8-1] | bit <- (convertIntBits byte 8)]
+-- get number of pixels that can store bytes
+getNumPixelsForStorage :: Image PixelRGB8 -> Int
+getNumPixelsForStorage img = (getWidth img) * (getHeight img) - 64
+
+getPixelsForMessage :: Int -> Int -> Int
+getPixelsForMessage len bitsPerPixel = div (len * 8) (bitsPerPixel * 3)
+
+-- getOptium bits per pixel color channel
+optiumBits :: Image PixelRGB8 -> Int -> Int
+optiumBits img bytes = max (ceiling ((toRational (bytes * 8)) / (toRational ((getNumPixelsForStorage img) * 3)))) 1
 
 maxBytes :: Image PixelRGB8 -> Int -> Int
 maxBytes img b = floor ((toRational ((getWidth img) * (getHeight img))) / (toRational (8.0 / (toRational ((toRational b) * 3.0)))))
@@ -101,26 +102,37 @@ maxBytes img b = floor ((toRational ((getWidth img) * (getHeight img))) / (toRat
 -- hide data in image
 encryptBytes :: Image PixelRGB8 -> Int -> [Word8] -> Either String (Image PixelRGB8)
 encryptBytes img bitsPerPixel message 
-  | (length message) < maxBytes img b = Right (runST $ do
+  | bitsPerPixel <= 8 = Right (runST $ do
       mut <- M.unsafeThawImage img
       let 
-        go i [] = M.freezeImage mut
-        go i (x:xs) = do
-              writeBitToImage img mut b i 0 (bits!!0)
-              writeBitToImage img mut b i 1 (bits!!1)
-              writeBitToImage img mut b i 2 (bits!!2)
-              writeBitToImage img mut b i 3 (bits!!3)
-              writeBitToImage img mut b i 4 (bits!!4)
-              writeBitToImage img mut b i 5 (bits!!5)
-              writeBitToImage img mut b i 6 (bits!!6)
-              writeBitToImage img mut b i 7 (bits!!7)
-              go (i + 1) xs
+        go i []     start b sf = M.freezeImage mut
+        go i (x:xs) start b sf = do
+              writeBitToImage img mut b i 0 (bits!!0) start sf
+              writeBitToImage img mut b i 1 (bits!!1) start sf
+              writeBitToImage img mut b i 2 (bits!!2) start sf
+              writeBitToImage img mut b i 3 (bits!!3) start sf
+              writeBitToImage img mut b i 4 (bits!!4) start sf
+              writeBitToImage img mut b i 5 (bits!!5) start sf
+              writeBitToImage img mut b i 6 (bits!!6) start sf
+              writeBitToImage img mut b i 7 (bits!!7) start sf
+              go (i + 1) xs start b sf
             where 
               bits = convertIntBits (x) 8
-      go 0 message)
+      go 
+        0 
+        (convertInt32Word8 len) 
+        0 
+        2 
+        ((toRational (getPixelsForMessage 4 2)) / (toRational 64))
+      go 
+        0 
+        message 
+        64 
+        bitsPerPixel 
+        ((toRational (getPixelsForMessage len bitsPerPixel)) / (toRational (getNumPixelsForStorage img))))
   | otherwise = Left "Too many bytes to encode into image"
   where 
-    b = bitsPerPixel -- bits per channel
+    len = length message
 
 -- sets bit 
 getChanged :: Int -> Int -> Bool -> Int
@@ -164,9 +176,9 @@ main = do
   putStrLn "Finished reading data from file"
   putStrLn ("Read " Prelude.++ (show (Prelude.length d)) Prelude.++ " bytes")
   
-  putStrLn "How many bits are stored per pixel color channel? (default 2)"
-  val <- getLine
-  let bitsPerPixel = read val :: Int
+  --putStrLn "How many bits are stored per pixel color channel? (default 2)"
+  --val <- getLine
+  --let bitsPerPixel = read val :: Int'
   
   -- read image to encode image into
   putStrLn "What image is being read into: "
@@ -178,9 +190,13 @@ main = do
     Left error  -> putStrLn error
     Right image -> do
         let 
-          messgae = (convertInt32Word8 ((length f) + 1 + (length d))) ++ 
-                     (convertString f) ++ [nullWord8] ++ d
-          final = (encryptBytes (convertRGB8 image) bitsPerPixel messgae)
+          conv = (convertRGB8 image)
+          len = (length f) + 1 + (length d)
+          bitsPerPixel = optiumBits conv len
+        print bitsPerPixel
+        let
+          messgae = (convertString f) ++ [nullWord8] ++ d
+          final = (encryptBytes conv bitsPerPixel messgae)
         case final of 
           Left errorStr   -> putStrLn errorStr
           Right encrypted -> do 
