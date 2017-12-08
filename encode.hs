@@ -5,6 +5,7 @@ import Control.Monad.ST
 import Control.Monad.Primitive
 import Data.Bits
 import Data.Char (chr)
+import System.IO.Unsafe
 import Data.Word
 import qualified Codec.Picture.Types as M
 import qualified Data.ByteString.Lazy as BS
@@ -64,7 +65,19 @@ convertIntBits x b = map (testBit x) [0..b - 1]
 
 -- Write a set of bits at index i to an image
 -- writeBitToImage :: Image PixelRGB8 -> m (M.MutableImage (PrimState m) PixelRGB8) -> Int -> Int -> Int -> Bool -> m0 ()
-writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal start sf
+
+geta img bitsPerPixel byteIdx bitIdx offset sf val = unsafePerformIO $ do
+  let 
+    a = floor (fromIntegral (byteIdx * 8 + bitIdx) * sf)
+    p = (div a (bitsPerPixel * 3)) + offset 
+    px = mod p (getWidth img)
+    py = div p (getWidth img)
+    c = (div (mod a (bitsPerPixel * 3)) bitsPerPixel)
+    d = (mod (mod a (bitsPerPixel * 3)) bitsPerPixel)
+  print [a, p, px, py, c, d]
+  return a
+
+writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal offset sf
   | c == 0 = M.writePixel img px py (PixelRGB8 
     (getChangedPixel (getRed (pixelAt orig px py)) d bitVal) 
     (getGreen (pixelAt orig px py)) 
@@ -79,7 +92,7 @@ writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal start sf
     (getChangedPixel (getBlue (pixelAt orig px py)) d bitVal))
   where
     a = floor (fromIntegral (byteIdx * 8 + bitIdx) * sf)
-    p = (div a (bitsPerPixel * 3)) + start 
+    p = (div a (bitsPerPixel * 3)) + offset 
     px = mod p (getWidth orig)
     py = div p (getWidth orig)
     c = (div (mod a (bitsPerPixel * 3)) bitsPerPixel)
@@ -87,7 +100,10 @@ writeBitToImage orig img bitsPerPixel byteIdx bitIdx bitVal start sf
 
 -- get number of pixels that can store bytes
 getNumPixelsForStorage :: Image PixelRGB8 -> Int
-getNumPixelsForStorage img = (getWidth img) * (getHeight img) - 64
+getNumPixelsForStorage img = (getWidth img) * (getHeight img) - 64 - 1
+
+getStorableBits :: Image PixelRGB8 -> Int -> Int
+getStorableBits img bitsPerPixel = ((getWidth img) * (getHeight img) - 64 - 1) * bitsPerPixel * 3
 
 getPixelsForMessage :: Int -> Int -> Int
 getPixelsForMessage len bitsPerPixel = div (len * 8) (bitsPerPixel * 3)
@@ -122,14 +138,15 @@ encryptBytes img bitsPerPixel message
         0 
         (convertInt32Word8 len) 
         0 
-        2 
-        ((toRational (getPixelsForMessage 4 2)) / (toRational 64))
+        1 
+        (63 / (fromIntegral (getPixelsForMessage 4 1)))
       go 
         0 
         message 
         64 
         bitsPerPixel 
-        ((toRational (getPixelsForMessage len bitsPerPixel)) / (toRational (getNumPixelsForStorage img))))
+        ((toRational (getStorableBits img bitsPerPixel)) / (toRational (len * 8)))
+      )
   | otherwise = Left "Too many bytes to encode into image"
   where 
     len = length message
@@ -193,7 +210,7 @@ main = do
           conv = (convertRGB8 image)
           len = (length f) + 1 + (length d)
           bitsPerPixel = optiumBits conv len
-        print bitsPerPixel
+        putStrLn ("Distortion level (1 min 8 max) : " ++ (show bitsPerPixel))
         let
           messgae = (convertString f) ++ [nullWord8] ++ d
           final = (encryptBytes conv bitsPerPixel messgae)

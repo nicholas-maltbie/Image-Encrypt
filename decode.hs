@@ -5,6 +5,7 @@ import Control.Monad.ST
 import Control.Monad.Primitive
 import Data.Bits
 import Data.Char (chr)
+import System.IO.Unsafe
 import Data.Word
 import qualified Codec.Picture.Types as M
 import qualified Data.ByteString as B
@@ -76,7 +77,7 @@ readBitFromImage img bitsPerPixel byteIdx bitIdx offset sf
   | c == 2 = readPixelBit (getBlue  (pixelAt img px py)) d
   where 
     a = floor (fromIntegral (byteIdx * 8 + bitIdx) * sf)
-    p = (div a (bitsPerPixel * 3)) + offset
+    p = (div a (bitsPerPixel * 3)) + offset 
     px = mod p (getWidth img)
     py = div p (getWidth img)
     c = (div (mod a (bitsPerPixel * 3)) bitsPerPixel)
@@ -84,7 +85,10 @@ readBitFromImage img bitsPerPixel byteIdx bitIdx offset sf
 
 -- get number of pixels that can store bytes
 getNumPixelsForStorage :: Image PixelRGB8 -> Int
-getNumPixelsForStorage img = (getWidth img) * (getHeight img) - 64
+getNumPixelsForStorage img = (getWidth img) * (getHeight img) - 64 - 1
+
+getStorableBits :: Image PixelRGB8 -> Int -> Int
+getStorableBits img bitsPerPixel = ((getWidth img) * (getHeight img) - 64 - 1) * bitsPerPixel * 3
 
 getPixelsForMessage :: Int -> Int -> Int
 getPixelsForMessage len bitsPerPixel = div (len * 8) (bitsPerPixel * 3)
@@ -120,26 +124,20 @@ readNBytes img start b n offset sf
 -- Decrypt bites from file
 decryptBytes :: Image PixelRGB8 -> IO ()
 decryptBytes img = do
-  print (readNBytes 
-      img 
-      0 
-      2 
-      4 
-      0 
-      ((fromIntegral (getPixelsForMessage 4 2)) / 64))
   putStrLn ("Found file '" ++ filePath ++ "', " ++ (show len) ++ " total bytes")
   putStrLn ("What would you like to save the file as?")
   o <- getLine
   BS.writeFile o (BS.pack file)
   putStrLn ("Saved output to " ++ o)
   where
-    len = convertWord8Int (readNBytes 
+    len = fromIntegral (convertWord8Int (readNBytes 
       img 
       0 
-      2 
+      1 
       4 
       0 
-      ((fromIntegral (getPixelsForMessage 4 2)) / 64))
+      (63 / (fromIntegral (getPixelsForMessage 4 1)))
+      ))
     bitsPerPixel = optiumBits img len
     b = bitsPerPixel
     name = readByteStream 
@@ -147,15 +145,15 @@ decryptBytes img = do
       0 
       b 
       64 
-      ((fromIntegral (getPixelsForMessage len bitsPerPixel)) / (fromIntegral (getNumPixelsForStorage img)))
+      ((fromIntegral (getStorableBits img bitsPerPixel)) / (fromIntegral (len * 8)))
     filePath = convertWord8List name
     file = readNBytes 
       img 
       ((length name) + 1) 
       b 
       (len - ((length name) + 1)) 
-      64 
-      ((fromIntegral (getPixelsForMessage len bitsPerPixel)) / (fromIntegral (getNumPixelsForStorage img)))
+      64
+      ((fromIntegral (getStorableBits img bitsPerPixel)) / (fromIntegral (len * 8)))
 
 
 readPixelBit :: Pixel8 -> Int -> Bool
